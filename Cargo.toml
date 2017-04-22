@@ -20,6 +20,7 @@ name = "hyper_static"
 futures = "^0.1"
 memmap = "^0.5"
 hyper = { git = "https://github.com/hyperium/hyper", branch = "master" }
+mime_guess = "^1"
 
 [dependencies.clap]
 version = "^2"
