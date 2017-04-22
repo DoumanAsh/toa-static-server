@@ -1,15 +1,37 @@
-extern crate futures;
 extern crate hyper;
-extern crate memmap;
 
-mod server;
+extern crate hyper_static;
+
+use hyper_static::{StaticServe};
 
 use hyper::server::{Http};
 
-fn main() {
-    let addr = "127.0.0.1:3333".parse().unwrap();
+use std::net;
+use std::process::exit;
 
-    let server = Http::new().bind(&addr, || Ok(server::StaticServe(".".to_string()))).unwrap();
-    println!("Start static server");
+#[macro_use]
+mod utils;
+mod cli;
+
+fn run() -> Result<i32, String> {
+    let args = cli::Args::new();
+    let port = args.get_u16("port")?;
+    let dir = args.get_string("dir");
+    let addr = net::SocketAddr::new(net::IpAddr::V4(net::Ipv4Addr::new(127, 0, 0, 1)), port);
+
+    let server = Http::new().bind(&addr, StaticServe::new(dir.clone())).unwrap();
+    println!("Start static server on port {}. Serve directory='{}'", port, &dir);
     server.run().unwrap();
+
+    Ok(0)
+}
+
+fn main() {
+    exit(match run() {
+        Ok(res) => res,
+        Err(error) => {
+            error_println!("{}", error);
+            1
+        }
+    });
 }

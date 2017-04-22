@@ -12,7 +12,16 @@ readme = "README.md"
 keywords = ["static-server"]
 license = "MIT"
 
+[lib]
+path = "src/lib.rs"
+name = "hyper_static"
+
 [dependencies]
 futures = "^0.1"
 memmap = "^0.5"
 hyper = { git = "https://github.com/hyperium/hyper", branch = "master" }
+
+[dependencies.clap]
+version = "^2"
+default-features = false
+features = ["suggestions", "wrap_help"]
