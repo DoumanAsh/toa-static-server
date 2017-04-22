@@ -1,0 +1,18 @@
+[package]
+name = "toa-static-server"
+version = "0.1.0"
+authors = ["Douman <douman@gmx.se>"]
+categories = ["command-line-utilities"]
+description = "Kawaii HTTP Static Server"
+
+homepage = "https://github.com/DoumanAsh/toa-static-server"
+repository = "https://github.com/DoumanAsh/toa-static-server"
+
+readme = "README.md"
+keywords = ["static-server"]
+license = "MIT"
+
+[dependencies]
+futures = "^0.1"
+memmap = "^0.5"
+hyper = { git = "https://github.com/hyperium/hyper", branch = "master" }
