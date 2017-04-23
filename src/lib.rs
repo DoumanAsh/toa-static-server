@@ -33,7 +33,7 @@ impl StaticServe {
 
     fn get_file(&self, request_path: &str) -> Option<(io::Result<fs::File>, header::ContentType)> {
         let path = path::Path::new(&self.root);
-        let path = path.join(&request_path[1..]);
+        let path = path.join(request_path);
 
         if path.is_file() {
             let mime = header::ContentType(guess_mime_type(&path));
@@ -103,7 +103,7 @@ impl Service for StaticServe {
             return futures::future::ok(self.method_not_allowed());
         }
 
-        futures::future::ok(match self.get_file(req.path()) {
+        futures::future::ok(match self.get_file(&req.path()[1..]) {
             Some((Ok(file), mime)) => {
                 let stats = match file.metadata() {
                     Ok(stats) => stats,
@@ -137,5 +137,84 @@ impl NewService for StaticServe {
 
     fn new_service(&self) -> Result<Self::Instance, io::Error> {
         Ok(self.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hyper;
+    #[test]
+    fn to_buffer() {
+        let data = [1, 2, 3, 4, 5, 6, 7, 100, 10, 20, 30];
+        let result = super::to_buffer(&data);
+
+        assert_eq!(data.len(), result.len());
+        assert_eq!(&data, result.as_slice());
+    }
+
+    #[test]
+    fn to_encoded_buffer_fail() {
+        let data = [1, 2, 3, 4, 5, 6, 7, 100, 10, 20, 30];
+        let header = hyper::header::AcceptEncoding(vec![]);
+        let result = super::to_encoded_buffer(&data, &header);
+
+        assert_eq!(data.len(), result.len());
+        assert_eq!(&data, result.as_slice());
+    }
+
+    macro_rules! hyper_encoding {
+        ($name:ident) => {
+            hyper_encoding!($name, 10)
+        };
+        ($name:ident, $quality:expr) => {{
+            hyper::header::QualityItem {
+                item: hyper::header::Encoding::$name,
+                quality: hyper::header::Quality($quality)
+            }
+        }};
+    }
+
+    #[test]
+    fn to_encoded_buffer_ok() {
+        let data = [1, 2, 3, 4, 5, 6, 7, 100, 10, 20, 30];
+        let encodings = vec![hyper_encoding!(Gzip), hyper_encoding!(Deflate)];
+        let header = hyper::header::AcceptEncoding(encodings);
+        let result = super::to_encoded_buffer(&data, &header);
+
+        assert_ne!(data.len(), result.len());
+        assert_ne!(&data, result.as_slice());
+    }
+
+    use std::path;
+    use hyper::mime;
+    #[test]
+    fn get_file_ok() {
+        let current_file = file!();
+        let current_dir = path::Path::new(current_file).parent().unwrap();
+        let current_file = path::Path::new(current_file).file_name().unwrap().to_str().unwrap().to_string();
+
+        let static_serve = super::StaticServe::new(current_dir.to_str().unwrap().to_string());
+
+        let result = static_serve.get_file(&current_file);
+
+        assert!(result.is_some());
+        let (result_file, result_content) = result.unwrap();
+
+        assert!(result_file.is_ok());
+        assert_eq!((result_content.0).0, mime::TopLevel::Text);
+        assert_eq!((result_content.0).1, mime::SubLevel::Ext("x-rust".to_string()));
+    }
+
+    #[test]
+    fn get_file_fail() {
+        let current_file = file!();
+        let current_dir = path::Path::new(current_file).parent().unwrap();
+        let current_file = path::Path::new(current_file).with_extension("lolka").file_name().unwrap().to_str().unwrap().to_string();
+
+        let static_serve = super::StaticServe::new(current_dir.to_str().unwrap().to_string());
+
+        let result = static_serve.get_file(&current_file);
+
+        assert!(result.is_none());
     }
 }
