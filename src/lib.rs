@@ -2,11 +2,15 @@ extern crate futures;
 extern crate hyper;
 extern crate memmap;
 extern crate mime_guess;
+extern crate deflate;
+extern crate unicase;
 
 use std::path;
 use std::fs;
 use std::io;
 
+use unicase::UniCase;
+use deflate::deflate_bytes;
 use memmap::Mmap;
 use futures::future::FutureResult;
 use hyper::server::{NewService, Service, Request, Response};
@@ -70,6 +74,24 @@ impl StaticServe {
     }
 }
 
+#[inline]
+fn to_buffer(data: &[u8]) -> Vec<u8> {
+    let mut buffer = Vec::with_capacity(data.len());
+    buffer.extend_from_slice(data);
+    buffer
+}
+
+#[inline]
+fn to_encoded_buffer(data: &[u8], header: &hyper::header::AcceptEncoding) -> Vec<u8> {
+    for idx in 0..header.len() {
+        if header[idx].item == header::Encoding::Deflate {
+            return deflate_bytes(data);
+        }
+    }
+
+    to_buffer(data)
+}
+
 impl Service for StaticServe {
     type Request = Request;
     type Response = Response;
@@ -83,13 +105,20 @@ impl Service for StaticServe {
 
         futures::future::ok(match self.get_file(req.path()) {
             Some((Ok(file), mime)) => {
-                let stats = file.metadata().unwrap();
+                let stats = match file.metadata() {
+                    Ok(stats) => stats,
+                    Err(error) => return futures::future::ok(self.internal_error(format!("{}", error))),
+                };
 
                 let file = Mmap::open(&file, ::memmap::Protection::Read).unwrap();
-                let mut content = Vec::new();
-                content.extend_from_slice(unsafe { file.as_slice() });
+                let content = match req.headers().get::<header::AcceptEncoding>() {
+                    Some(header) => to_encoded_buffer(unsafe {file.as_slice()}, header),
+                    None => to_buffer(unsafe {file.as_slice() })
+                };
                 Response::new().with_status(hyper::StatusCode::Ok)
                                .with_header(header::ContentLength(stats.len()))
+                               .with_header(header::Vary::Items(vec![UniCase("Accept-Encoding".to_owned())]))
+                               .with_header(header::ContentEncoding(vec![header::Encoding::Deflate]))
                                .with_header(mime)
                                .with_body(content)
 

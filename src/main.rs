@@ -19,8 +19,8 @@ fn run() -> Result<i32, String> {
     let dir = args.get_string("dir");
     let addr = net::SocketAddr::new(net::IpAddr::V4(net::Ipv4Addr::new(127, 0, 0, 1)), port);
 
-    let server = Http::new().bind(&addr, StaticServe::new(dir.clone())).unwrap();
     println!("Start static server on port {}. Serve directory='{}'", port, &dir);
+    let server = Http::new().bind(&addr, StaticServe::new(dir)).unwrap();
     server.run().unwrap();
 
     Ok(0)

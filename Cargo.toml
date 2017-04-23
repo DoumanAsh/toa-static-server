@@ -17,6 +17,8 @@ path = "src/lib.rs"
 name = "hyper_static"
 
 [dependencies]
+unicase = "^1"
+deflate = "^0.7"
 futures = "^0.1"
 memmap = "^0.5"
 hyper = { git = "https://github.com/hyperium/hyper", branch = "master" }
