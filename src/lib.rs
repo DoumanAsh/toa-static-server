@@ -8,6 +8,7 @@ extern crate unicase;
 use std::path;
 use std::fs;
 use std::io;
+use std::time;
 
 use unicase::UniCase;
 use deflate::deflate_bytes;
@@ -16,6 +17,16 @@ use futures::future::FutureResult;
 use hyper::server::{NewService, Service, Request, Response};
 use hyper::header;
 use mime_guess::guess_mime_type;
+
+fn etag(stats: &fs::Metadata) -> header::EntityTag {
+    if let Ok(modified) = stats.modified() {
+        let modified = modified.duration_since(time::UNIX_EPOCH).expect("Modified is earlier than time::UNIX_EPOCH!");
+        header::EntityTag::weak(format!("{}.{}-{}", modified.as_secs(), modified.subsec_nanos(), stats.len()))
+    }
+    else {
+        header::EntityTag::weak(format!("{}", stats.len()))
+    }
+}
 
 #[derive(Clone)]
 ///Hyper Static File Serve Service
@@ -72,6 +83,45 @@ impl StaticServe {
         Response::new().with_status(hyper::StatusCode::NotFound)
                        .with_body(NOT_FOUND)
     }
+
+    #[inline]
+    ///Returns 304 response if cache is suitable
+    fn cache_response(&self, req: &Request, expected_etag: &header::EntityTag) -> Option<Response> {
+        let etags = match req.headers().get::<header::IfNoneMatch>() {
+            Some(header) => {
+                match *header {
+                    header::IfNoneMatch::Items(ref etags) => etags,
+                    _ => return None,
+                }
+            }
+            None => return None,
+        };
+
+        for etag in etags {
+            if expected_etag.weak_eq(&etag) {
+                return Some(Response::new().with_status(hyper::StatusCode::NotModified))
+            }
+        }
+
+        None
+    }
+
+    #[inline]
+    ///Prepare response with file content.
+    fn send_file(&self, req: &Request, stats: &fs::Metadata, file: &fs::File, mime: header::ContentType, etag: header::EntityTag) -> Response {
+        let file = Mmap::open(&file, ::memmap::Protection::Read).unwrap();
+        let content = match req.headers().get::<header::AcceptEncoding>() {
+            Some(header) => to_encoded_buffer(unsafe {file.as_slice()}, header),
+            None => to_buffer(unsafe {file.as_slice() })
+        };
+        Response::new().with_status(hyper::StatusCode::Ok)
+            .with_header(header::ETag(etag))
+            .with_header(header::Vary::Items(vec![UniCase("Accept-Encoding".to_owned())]))
+            .with_header(header::ContentLength(stats.len()))
+            .with_header(header::ContentEncoding(vec![header::Encoding::Deflate]))
+            .with_header(mime)
+            .with_body(content)
+    }
 }
 
 #[inline]
@@ -110,18 +160,14 @@ impl Service for StaticServe {
                     Err(error) => return futures::future::ok(self.internal_error(format!("{}", error))),
                 };
 
-                let file = Mmap::open(&file, ::memmap::Protection::Read).unwrap();
-                let content = match req.headers().get::<header::AcceptEncoding>() {
-                    Some(header) => to_encoded_buffer(unsafe {file.as_slice()}, header),
-                    None => to_buffer(unsafe {file.as_slice() })
-                };
-                Response::new().with_status(hyper::StatusCode::Ok)
-                               .with_header(header::ContentLength(stats.len()))
-                               .with_header(header::Vary::Items(vec![UniCase("Accept-Encoding".to_owned())]))
-                               .with_header(header::ContentEncoding(vec![header::Encoding::Deflate]))
-                               .with_header(mime)
-                               .with_body(content)
+                let etag = etag(&stats);
 
+                if let Some(response) = self.cache_response(&req, &etag) {
+                    response
+                }
+                else {
+                    self.send_file(&req, &stats, &file, mime, etag)
+                }
             },
             Some((Err(error), _)) => self.internal_error(format!("{}", error)),
             None => self.not_found()
