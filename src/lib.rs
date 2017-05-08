@@ -18,13 +18,15 @@ use hyper::server::{NewService, Service, Request, Response};
 use hyper::header;
 use mime_guess::guess_mime_type;
 
-fn etag(stats: &fs::Metadata) -> header::EntityTag {
-    if let Ok(modified) = stats.modified() {
-        let modified = modified.duration_since(time::UNIX_EPOCH).expect("Modified is earlier than time::UNIX_EPOCH!");
-        header::EntityTag::weak(format!("{}.{}-{}", modified.as_secs(), modified.subsec_nanos(), stats.len()))
+fn cache_headers(stats: &fs::Metadata) -> (header::EntityTag, Option<header::LastModified>) {
+    if let Ok(sys_modified) = stats.modified() {
+        let modified = sys_modified.duration_since(time::UNIX_EPOCH).expect("Modified is earlier than time::UNIX_EPOCH!");
+        let etag = header::EntityTag::strong(format!("{}.{}-{}", modified.as_secs(), modified.subsec_nanos(), stats.len()));
+        let modified = time::SystemTime::now() - sys_modified.elapsed().expect("Failed to elapse metadata.modified()");
+        (etag, Some(header::LastModified(modified.into())))
     }
     else {
-        header::EntityTag::weak(format!("{}", stats.len()))
+        (header::EntityTag::strong(format!("{}", stats.len())), None)
     }
 }
 
@@ -97,8 +99,11 @@ impl StaticServe {
             None => return None,
         };
 
+        //While we send Last-Modified.
+        //Etag uses its and file size for its value.
+        //Therefore if ETag matches then If-Unmodified-Since will match too
         for etag in etags {
-            if expected_etag.weak_eq(&etag) {
+            if expected_etag.strong_eq(&etag) {
                 return Some(Response::new().with_status(hyper::StatusCode::NotModified))
             }
         }
@@ -108,17 +113,26 @@ impl StaticServe {
 
     #[inline]
     ///Prepare response with file content.
-    fn send_file(&self, req: &Request, stats: &fs::Metadata, file: &fs::File, mime: header::ContentType, etag: header::EntityTag) -> Response {
+    fn send_file(&self, req: &Request, stats: &fs::Metadata, file: &fs::File, mime: header::ContentType, etag: header::EntityTag, modified: Option<header::LastModified>) -> Response {
         let file = Mmap::open(&file, ::memmap::Protection::Read).unwrap();
         let content = match req.headers().get::<header::AcceptEncoding>() {
             Some(header) => to_encoded_buffer(unsafe {file.as_slice()}, header),
             None => to_buffer(unsafe {file.as_slice() })
         };
+
+        let mut optional_headers = header::Headers::new();
+        if let Some(modified) = modified {
+            optional_headers.set(modified);
+        }
+
         Response::new().with_status(hyper::StatusCode::Ok)
-            .with_header(header::ETag(etag))
+            .with_headers(optional_headers)
+            .with_header(header::Server::new("Toa"))
             .with_header(header::Vary::Items(vec![UniCase("Accept-Encoding".to_owned())]))
             .with_header(header::ContentLength(stats.len()))
             .with_header(header::ContentEncoding(vec![header::Encoding::Deflate]))
+            .with_header(header::CacheControl(vec![header::CacheDirective::Public]))
+            .with_header(header::ETag(etag))
             .with_header(mime)
             .with_body(content)
     }
@@ -160,13 +174,13 @@ impl Service for StaticServe {
                     Err(error) => return futures::future::ok(self.internal_error(format!("{}", error))),
                 };
 
-                let etag = etag(&stats);
+                let (etag, modified) = cache_headers(&stats);
 
                 if let Some(response) = self.cache_response(&req, &etag) {
                     response
                 }
                 else {
-                    self.send_file(&req, &stats, &file, mime, etag)
+                    self.send_file(&req, &stats, &file, mime, etag, modified)
                 }
             },
             Some((Err(error), _)) => self.internal_error(format!("{}", error)),
@@ -215,7 +229,7 @@ mod tests {
         ($name:ident, $quality:expr) => {{
             hyper::header::QualityItem {
                 item: hyper::header::Encoding::$name,
-                quality: hyper::header::Quality($quality)
+                quality: hyper::header::q($quality)
             }
         }};
     }
