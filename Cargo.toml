@@ -17,12 +17,12 @@ path = "src/lib.rs"
 name = "hyper_static"
 
 [dependencies]
-unicase = "^1"
+unicase = "^2"
 deflate = "^0.7"
 futures = "^0.1"
 memmap = "^0.5"
-hyper = { git = "https://github.com/hyperium/hyper", branch = "master" }
-mime_guess = "^1"
+hyper = "^0.11"
+mime_guess = "^2.0.0-alpha"
 
 [dependencies.clap]
 version = "^2"

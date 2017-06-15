@@ -10,7 +10,7 @@ use std::fs;
 use std::io;
 use std::time;
 
-use unicase::UniCase;
+use unicase::Ascii;
 use deflate::deflate_bytes;
 use memmap::Mmap;
 use futures::future::FutureResult;
@@ -128,7 +128,7 @@ impl StaticServe {
         Response::new().with_status(hyper::StatusCode::Ok)
             .with_headers(optional_headers)
             .with_header(header::Server::new("Toa"))
-            .with_header(header::Vary::Items(vec![UniCase("Accept-Encoding".to_owned())]))
+            .with_header(header::Vary::Items(vec![Ascii::new("Accept-Encoding".to_owned())]))
             .with_header(header::ContentLength(stats.len()))
             .with_header(header::ContentEncoding(vec![header::Encoding::Deflate]))
             .with_header(header::CacheControl(vec![header::CacheDirective::Public]))
@@ -203,6 +203,7 @@ impl NewService for StaticServe {
 #[cfg(test)]
 mod tests {
     use super::hyper;
+    use hyper::mime;
     #[test]
     fn to_buffer() {
         let data = [1, 2, 3, 4, 5, 6, 7, 100, 10, 20, 30];
@@ -246,7 +247,6 @@ mod tests {
     }
 
     use std::path;
-    use hyper::mime;
     #[test]
     fn get_file_ok() {
         let current_file = file!();
@@ -261,8 +261,8 @@ mod tests {
         let (result_file, result_content) = result.unwrap();
 
         assert!(result_file.is_ok());
-        assert_eq!((result_content.0).0, mime::TopLevel::Text);
-        assert_eq!((result_content.0).1, mime::SubLevel::Ext("x-rust".to_string()));
+        assert_eq!((result_content.0).type_(), mime::TEXT);
+        assert_eq!((result_content.0).subtype(), "x-rust");
     }
 
     #[test]
