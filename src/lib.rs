@@ -114,10 +114,10 @@ impl StaticServe {
     #[inline]
     ///Prepare response with file content.
     fn send_file(&self, req: &Request, stats: &fs::Metadata, file: &fs::File, mime: header::ContentType, etag: header::EntityTag, modified: Option<header::LastModified>) -> Response {
-        let file = Mmap::open(&file, ::memmap::Protection::Read).unwrap();
+        let file = unsafe { Mmap::map(&file).unwrap() };
         let content = match req.headers().get::<header::AcceptEncoding>() {
-            Some(header) => to_encoded_buffer(unsafe {file.as_slice()}, header),
-            None => to_buffer(unsafe {file.as_slice() })
+            Some(header) => to_encoded_buffer(&file, header),
+            None => to_buffer(&file)
         };
 
         let mut optional_headers = header::Headers::new();
