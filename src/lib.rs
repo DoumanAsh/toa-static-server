@@ -115,12 +115,15 @@ impl StaticServe {
     ///Prepare response with file content.
     fn send_file(&self, req: &Request, stats: &fs::Metadata, file: &fs::File, mime: header::ContentType, etag: header::EntityTag, modified: Option<header::LastModified>) -> Response {
         let file = unsafe { Mmap::map(&file).unwrap() };
+        let mut optional_headers = header::Headers::new();
         let content = match req.headers().get::<header::AcceptEncoding>() {
-            Some(header) => to_encoded_buffer(&file, header),
+            Some(header) => {
+                optional_headers.set(header::ContentEncoding(vec![header::Encoding::Deflate]));
+                to_encoded_buffer(&file, header)
+            },
             None => to_buffer(&file)
         };
 
-        let mut optional_headers = header::Headers::new();
         if let Some(modified) = modified {
             optional_headers.set(modified);
         }
@@ -130,7 +133,6 @@ impl StaticServe {
             .with_header(header::Server::new("Toa"))
             .with_header(header::Vary::Items(vec![Ascii::new("Accept-Encoding".to_owned())]))
             .with_header(header::ContentLength(stats.len()))
-            .with_header(header::ContentEncoding(vec![header::Encoding::Deflate]))
             .with_header(header::CacheControl(vec![header::CacheDirective::Public]))
             .with_header(header::ETag(etag))
             .with_header(mime)
